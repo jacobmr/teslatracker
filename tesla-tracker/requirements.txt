@@ -1,0 +1,4 @@
+teslapy
+gspread
+requests
+oauth2client
