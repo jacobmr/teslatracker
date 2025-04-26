@@ -1,0 +1,4 @@
+# Tesla Tracker sensitive files
+/tesla-tracker/creds.json
+/tesla-tracker/tesla_token.json
+/tesla-tracker/cache.json
