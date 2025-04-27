@@ -20,3 +20,4 @@ statusbot_debug.log
 .git.bfg-report/
 bfg-replacements.txt
 backup_20250427/
+tesla-tracker/last_update_id.txt

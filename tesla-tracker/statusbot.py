@@ -27,6 +27,23 @@ CAR_LABELS = [s.strip() for s in os.getenv("CAR_LABELS", "Car 1,Car 2").split(",
 
 pending_actions = {}
 
+# --- Persistent update_id storage ---
+LAST_UPDATE_ID_FILE = "last_update_id.txt"
+
+def load_last_update_id():
+    try:
+        with open(LAST_UPDATE_ID_FILE, "r") as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+def save_last_update_id(update_id):
+    try:
+        with open(LAST_UPDATE_ID_FILE, "w") as f:
+            f.write(str(update_id))
+    except Exception as e:
+        print(f"[ERROR] Could not save last_update_id: {e}", flush=True)
+
 # --- Telegram send helpers ---
 def send_telegram_message(message, markdown=False):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -111,172 +128,183 @@ def perform_tesla_action(car_index, action):
 # --- Main polling loop ---
 def poll_telegram_commands():
     print("[DEBUG] poll_telegram_commands loop started", flush=True)
-    last_update_id = None
+    last_update_id = load_last_update_id()
+    processed_update_ids = set()
     while True:
         print("[DEBUG] poll_telegram_commands loop alive", flush=True)
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-            if last_update_id:
+            if last_update_id is not None:
                 url += f"?offset={last_update_id + 1}"
             response = requests.get(url)
             updates = response.json().get('result', [])
             for update in updates:
-                print(f"[DEBUG] Processing update: {update}", flush=True)
-                last_update_id = update['update_id']
-                message = update.get('message', {}).get('text', '')
-                user_id = update.get('message', {}).get('from', {}).get('id')
-                print(f"[DEBUG] Received message: '{message}' from user {user_id} (update: {update})", flush=True)
-                # Handle pending action
-                if user_id in pending_actions:
-                    action = pending_actions[user_id]
-                    if message.strip() in ["1", "2"]:
-                        car_index = int(message.strip()) - 1
-                        success, result_msg = perform_tesla_action(car_index, action)
-                        print(f"[DEBUG] Tesla action result_msg: {result_msg}", flush=True)
-                        send_telegram_message(result_msg)
-                        # After action, send status
+                update_id = update['update_id']
+                if update_id in processed_update_ids:
+                    continue  # Skip already processed updates (in-memory)
+                processed_update_ids.add(update_id)
+                try:
+                    print(f"[DEBUG] Processing update: {update}", flush=True)
+                    message = update.get('message', {}).get('text', '')
+                    user_id = update.get('message', {}).get('from', {}).get('id')
+                    print(f"[DEBUG] Received message: '{message}' from user {user_id} (update: {update})", flush=True)
+                    # Handle pending action
+                    if user_id in pending_actions:
+                        action = pending_actions[user_id]
+                        if message.strip() in ["1", "2"]:
+                            car_index = int(message.strip()) - 1
+                            try:
+                                success, result_msg = perform_tesla_action(car_index, action)
+                                print(f"[DEBUG] Tesla action result_msg: {result_msg}", flush=True)
+                                send_telegram_message(result_msg)
+                                # After action, send status
+                                try:
+                                    with open(LATEST_STATUS_FILE, 'r') as f:
+                                        status_data = json.load(f)
+                                    data = list(status_data.values())[car_index]
+                                    status_message = f"Status for {CAR_LABELS[car_index]}:\n"
+                                    status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                    status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                    status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                    status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                    send_telegram_message(status_message, markdown=True)
+                                except Exception as e:
+                                    send_telegram_message(f"Could not load status: {e}")
+                            finally:
+                                if user_id in pending_actions:
+                                    del pending_actions[user_id]
+                            continue
+                        else:
+                            send_telegram_message("Please reply with 1 for Car 1 or 2 for Car 2.")
+                            continue
+                    # Handle new commands
+                    if message == "/status":
+                        print("[DEBUG] Entered /status command handler", flush=True)
                         try:
                             with open(LATEST_STATUS_FILE, 'r') as f:
                                 status_data = json.load(f)
-                            data = list(status_data.values())[car_index]
-                            status_message = f"Status for {CAR_LABELS[car_index]}:\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            send_telegram_message(status_message, markdown=True)
+                            status_message = ""
+                            for vin, data in status_data.items():
+                                lat = data.get('latitude')
+                                lon = data.get('longitude')
+                                map_link = ""
+                                if lat is not None and lon is not None:
+                                    map_link = f"[Google Maps](https://maps.google.com/?q={lat},{lon})"
+                                    send_telegram_location(lat, lon)
+                                status_message += f"🚗 *{data['label']}*\n"
+                                status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                status_message += f"🧑‍💻 Software: {data.get('software_version', 'N/A')}\n"
+                                tp = data.get('tire_pressure', {})
+                                status_message += f"🛞 Tire Pressure (psi): {fmt_tire_pressure(tp)}\n"
+                                doors = data.get('doors', {})
+                                windows = data.get('windows', {})
+                                status_message += f"🚪 Doors: {summarize_doors(doors)}\n"
+                                status_message += f"🪟 Windows: {summarize_windows(windows)}\n"
+                                status_message += f"🧭 Heading: {data.get('heading', 'N/A')}°\n"
+                                notes = data.get('notifications', [])
+                                if notes:
+                                    status_message += "⚠️ Alerts: " + ", ".join([str(n) for n in notes]) + "\n"
+                                status_message += f"📍 {data.get('address', 'N/A')}\n"
+                                status_message += f"🕒 {data.get('timestamp', 'N/A')}\n"
+                                if map_link:
+                                    status_message += f"{map_link}\n"
+                                status_message += "\n"
                         except Exception as e:
-                            send_telegram_message(f"Could not load status: {e}")
-                        del pending_actions[user_id]
-                        continue
-                    else:
-                        send_telegram_message("Please reply with 1 for Car 1 or 2 for Car 2.")
-                        continue
-                # Handle new commands
-                if message == "/status":
-                    print("[DEBUG] Entered /status command handler", flush=True)
-                    try:
-                        with open(LATEST_STATUS_FILE, 'r') as f:
-                            status_data = json.load(f)
-                        status_message = ""
-                        for vin, data in status_data.items():
-                            lat = data.get('latitude')
-                            lon = data.get('longitude')
-                            map_link = ""
-                            if lat is not None and lon is not None:
-                                map_link = f"[Google Maps](https://maps.google.com/?q={lat},{lon})"
-                                send_telegram_location(lat, lon)
-                            status_message += f"🚗 *{data['label']}*\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            status_message += f"🧑‍💻 Software: {data.get('software_version', 'N/A')}\n"
-                            tp = data.get('tire_pressure', {})
-                            status_message += f"🛞 Tire Pressure (psi): {fmt_tire_pressure(tp)}\n"
-                            doors = data.get('doors', {})
-                            windows = data.get('windows', {})
-                            status_message += f"🚪 Doors: {summarize_doors(doors)}\n"
-                            status_message += f"🪟 Windows: {summarize_windows(windows)}\n"
-                            status_message += f"🧭 Heading: {data.get('heading', 'N/A')}°\n"
-                            notes = data.get('notifications', [])
-                            if notes:
-                                status_message += "⚠️ Alerts: " + ", ".join([str(n) for n in notes]) + "\n"
-                            status_message += f"📍 {data.get('address', 'N/A')}\n"
-                            status_message += f"🕒 {data.get('timestamp', 'N/A')}\n"
-                            if map_link:
-                                status_message += f"{map_link}\n"
-                            status_message += "\n"
-                    except Exception as e:
-                        status_message = f"Error reading status: {e}"
-                    send_telegram_message(status_message, markdown=True)
-                # --- Direct lock commands ---
-                elif message.startswith("/lock") and len(message) > 5 and message[5:].isdigit():
-                    car_index = int(message[5:]) - 1
-                    if car_index in [0, 1]:
-                        success, result_msg = perform_tesla_action(car_index, "lock")
-                        send_telegram_message(result_msg)
-                        # After action, send status
-                        try:
-                            with open(LATEST_STATUS_FILE, 'r') as f:
-                                status_data = json.load(f)
-                            data = list(status_data.values())[car_index]
-                            status_message = f"Status for {CAR_LABELS[car_index]}:\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            send_telegram_message(status_message, markdown=True)
-                        except Exception as e:
-                            send_telegram_message(f"Could not load status: {e}")
-                        return
-                # --- Direct close commands ---
-                elif message.startswith("/close") and len(message) > 6 and message[6:].isdigit():
-                    car_index = int(message[6:]) - 1
-                    if car_index in [0, 1]:
-                        success, result_msg = perform_tesla_action(car_index, "close")
-                        send_telegram_message(result_msg)
-                        try:
-                            with open(LATEST_STATUS_FILE, 'r') as f:
-                                status_data = json.load(f)
-                            data = list(status_data.values())[car_index]
-                            status_message = f"Status for {CAR_LABELS[car_index]}:\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            send_telegram_message(status_message, markdown=True)
-                        except Exception as e:
-                            send_telegram_message(f"Could not load status: {e}")
-                        return
-                # --- Direct sentry commands ---
-                elif message.startswith("/sentry") and len(message) > 7 and message[7:].isdigit():
-                    car_index = int(message[7:]) - 1
-                    if car_index in [0, 1]:
-                        success, result_msg = perform_tesla_action(car_index, "sentry")
-                        send_telegram_message(result_msg)
-                        try:
-                            with open(LATEST_STATUS_FILE, 'r') as f:
-                                status_data = json.load(f)
-                            data = list(status_data.values())[car_index]
-                            status_message = f"Status for {CAR_LABELS[car_index]}:\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            send_telegram_message(status_message, markdown=True)
-                        except Exception as e:
-                            send_telegram_message(f"Could not load status: {e}")
-                        return
-                elif message == "/lock":
-                    print("[DEBUG] Entered /lock command handler", flush=True)
-                    pending_actions[user_id] = "lock"
-                    send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
-                elif message == "/close":
-                    print("[DEBUG] Entered /close command handler", flush=True)
-                    pending_actions[user_id] = "close"
-                    send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
-                elif message == "/sentry":
-                    print("[DEBUG] Entered /sentry command handler", flush=True)
-                    pending_actions[user_id] = "sentry"
-                    send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
-                # --- Help command ---
-                elif message == "/help":
-                    help_message = (
-                        "*Tesla Tracker Bot Help*\n"
-                        "\n"
-                        "/status or /status# — Show the status of all vehicles.\n"
-                        "/lock or /lock# — Lock a car (prompt or specify 1=Car 1, 2=Car 2).\n"
-                        "/lock1 — Lock Car 1 directly.\n"
-                        "/lock2 — Lock Car 2 directly.\n"
-                        "/close or /close# — Close all windows (prompt or specify car).\n"
-                        "/sentry or /sentry# — Enable sentry mode (prompt or specify car).\n"
-                        "/help — Show this help message.\n"
-                        "\n"
-                        "Reply with 1 for Car 1 or 2 for Car 2 when prompted.\n"
-                        "You can also use the # suffix (e.g., /lock1, /close2, /sentry1) to act on a specific car without a prompt."
-                    )
-                    send_telegram_message(help_message, markdown=True)
+                            status_message = f"Error reading status: {e}"
+                        send_telegram_message(status_message, markdown=True)
+                    # --- Direct lock commands ---
+                    elif message.startswith("/lock") and len(message) > 5 and message[5:].isdigit():
+                        car_index = int(message[5:]) - 1
+                        if car_index in [0, 1]:
+                            success, result_msg = perform_tesla_action(car_index, "lock")
+                            send_telegram_message(result_msg)
+                            # After action, send status
+                            try:
+                                with open(LATEST_STATUS_FILE, 'r') as f:
+                                    status_data = json.load(f)
+                                data = list(status_data.values())[car_index]
+                                status_message = f"Status for {CAR_LABELS[car_index]}:\n"
+                                status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                send_telegram_message(status_message, markdown=True)
+                            except Exception as e:
+                                send_telegram_message(f"Could not load status: {e}")
+                            return
+                    # --- Direct close commands ---
+                    elif message.startswith("/close") and len(message) > 6 and message[6:].isdigit():
+                        car_index = int(message[6:]) - 1
+                        if car_index in [0, 1]:
+                            success, result_msg = perform_tesla_action(car_index, "close")
+                            send_telegram_message(result_msg)
+                            try:
+                                with open(LATEST_STATUS_FILE, 'r') as f:
+                                    status_data = json.load(f)
+                                data = list(status_data.values())[car_index]
+                                status_message = f"Status for {CAR_LABELS[car_index]}:\n"
+                                status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                send_telegram_message(status_message, markdown=True)
+                            except Exception as e:
+                                send_telegram_message(f"Could not load status: {e}")
+                            return
+                    # --- Direct sentry commands ---
+                    elif message.startswith("/sentry") and len(message) > 7 and message[7:].isdigit():
+                        car_index = int(message[7:]) - 1
+                        if car_index in [0, 1]:
+                            success, result_msg = perform_tesla_action(car_index, "sentry")
+                            send_telegram_message(result_msg)
+                            try:
+                                with open(LATEST_STATUS_FILE, 'r') as f:
+                                    status_data = json.load(f)
+                                data = list(status_data.values())[car_index]
+                                status_message = f"Status for {CAR_LABELS[car_index]}:\n"
+                                status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                send_telegram_message(status_message, markdown=True)
+                            except Exception as e:
+                                send_telegram_message(f"Could not load status: {e}")
+                            return
+                    elif message == "/lock":
+                        print("[DEBUG] Entered /lock command handler", flush=True)
+                        pending_actions[user_id] = "lock"
+                        send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
+                    elif message == "/close":
+                        print("[DEBUG] Entered /close command handler", flush=True)
+                        pending_actions[user_id] = "close"
+                        send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
+                    elif message == "/sentry":
+                        print("[DEBUG] Entered /sentry command handler", flush=True)
+                        pending_actions[user_id] = "sentry"
+                        send_telegram_message("Which car? (1 for Car 1, 2 for Car 2)")
+                    # --- Help command ---
+                    elif message == "/help":
+                        help_message = (
+                            "*Tesla Tracker Bot Help*\n"
+                            "\n"
+                            "/status or /status# — Show the status of all vehicles.\n"
+                            "/lock or /lock# — Lock a car (prompt or specify 1=Car 1, 2=Car 2).\n"
+                            "/lock1 — Lock Car 1 directly.\n"
+                            "/lock2 — Lock Car 2 directly.\n"
+                            "/close or /close# — Close all windows (prompt or specify car).\n"
+                            "/sentry or /sentry# — Enable sentry mode (prompt or specify car).\n"
+                            "/help — Show this help message.\n"
+                            "\n"
+                            "Reply with 1 for Car 1 or 2 for Car 2 when prompted.\n"
+                            "You can also use the # suffix (e.g., /lock1, /close2, /sentry1) to act on a specific car without a prompt."
+                        )
+                        send_telegram_message(help_message, markdown=True)
+                finally:
+                    last_update_id = update_id
+                    save_last_update_id(last_update_id)
         except Exception as e:
             print(f"[ERROR] Exception in poll_telegram_commands: {e}", flush=True)
         time.sleep(30)
