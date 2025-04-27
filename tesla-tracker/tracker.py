@@ -4,16 +4,19 @@ import teslapy
 import gspread
 import requests
 import json
+import os
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from math import radians, cos, sin, asin, sqrt
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- Config ---
 TESLA_EMAIL = "jacob@reider.us"
 GOOGLE_CREDS_JSON = "/home/jacob/tesla-tracker/creds.json"
 SHEET_NAME = "Tesla Tracker"
-GOOGLE_MAPS_API_KEY = "AIzaSyBDbB0vDfahSkp0YAIijbIcLxO7fUb_XBI"
-TELEGRAM_BOT_TOKEN = "7748644682:AAHYHAtgu8Xf5kRve_p5JdZRX-qQZM5pN7E"
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = "6269997804"
 POLL_INTERVAL = 60  # seconds
 

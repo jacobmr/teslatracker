@@ -180,4 +180,4 @@ MIT License.
 ---
 
 **Questions?**  
-Open an issue on GitHub or email jacob@reider.us
+Open an issue on GitHub or email jacob@reider.usbrew install 
