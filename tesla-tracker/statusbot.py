@@ -1,9 +1,16 @@
+import sys
+sys.stdout = open("statusbot_debug.log", "a")
+sys.stderr = sys.stdout
+print("StatusBot started")
 import time
 import json
 import requests
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- Config ---
-TELEGRAM_BOT_TOKEN = "7748644682:AAHYHAtgu8Xf5kRve_p5JdZRX-qQZM5pN7E"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = "6269997804"
 LATEST_STATUS_FILE = '/home/jacob/tesla-tracker/latest_status.json'
 
@@ -59,57 +66,58 @@ def poll_telegram_commands():
                 url += f"?offset={last_update_id + 1}"
 
             response = requests.get(url)
-            updates = response.json().get('result', [])
+            data = response.json()
+            if "result" in data:
+                updates = data["result"]
+                for update in updates:
+                    last_update_id = update['update_id']
+                    message = update.get('message', {}).get('text', '')
 
-            for update in updates:
-                last_update_id = update['update_id']
-                message = update.get('message', {}).get('text', '')
+                    if message == "/status":
+                        try:
+                            with open(LATEST_STATUS_FILE, 'r') as f:
+                                status_data = json.load(f)
+                        except Exception:
+                            status_data = {}
 
-                if message == "/status":
-                    try:
-                        with open(LATEST_STATUS_FILE, 'r') as f:
-                            status_data = json.load(f)
-                    except Exception:
-                        status_data = {}
+                        if status_data:
+                            status_message = "\U0001F697 Tesla Status:\n"
+                            for vin, data in status_data.items():
+                                lat = data.get('latitude')
+                                lon = data.get('longitude')
+                                map_link = ""
+                                if lat is not None and lon is not None:
+                                    map_link = f"[Google Maps](https://maps.google.com/?q={lat},{lon})"
+                                    send_telegram_location(lat, lon)
+                                # Compose improved, normalized status
+                                status_message += f"🚗 *{data['label']}*\n"
+                                status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
+                                status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
+                                status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
+                                status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
+                                status_message += f"🧑‍💻 Software: {data.get('software_version', 'N/A')}\n"
+                                # Tire pressure (convert bar to psi)
+                                tp = data.get('tire_pressure', {})
+                                status_message += f"🛞 Tire Pressure (psi): {fmt_tire_pressure(tp)}\n"
+                                # Doors/windows
+                                doors = data.get('doors', {})
+                                windows = data.get('windows', {})
+                                status_message += f"🚪 Doors: {summarize_doors(doors)}\n"
+                                status_message += f"🪟 Windows: {summarize_windows(windows)}\n"
+                                status_message += f"🧭 Heading: {data.get('heading', 'N/A')}°\n"
+                                # Notifications/alerts
+                                notes = data.get('notifications', [])
+                                if notes:
+                                    status_message += "⚠️ Alerts: " + ", ".join([str(n) for n in notes]) + "\n"
+                                status_message += f"📍 {data.get('address', 'N/A')}\n"
+                                status_message += f"🕒 {data.get('timestamp', 'N/A')}\n"
+                                if map_link:
+                                    status_message += f"{map_link}\n"
+                                status_message += "\n"
+                        else:
+                            status_message = "No status available yet."
 
-                    if status_data:
-                        status_message = "\U0001F697 Tesla Status:\n"
-                        for vin, data in status_data.items():
-                            lat = data.get('latitude')
-                            lon = data.get('longitude')
-                            map_link = ""
-                            if lat is not None and lon is not None:
-                                map_link = f"[Google Maps](https://maps.google.com/?q={lat},{lon})"
-                                send_telegram_location(lat, lon)
-                            # Compose improved, normalized status
-                            status_message += f"🚗 *{data['label']}*\n"
-                            status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
-                            status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
-                            status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
-                            status_message += f"🔒 Locked: {fmt_bool(data.get('locked'))}   |   Sentry: {fmt_bool(data.get('sentry_mode'))}\n"
-                            status_message += f"🧑‍💻 Software: {data.get('software_version', 'N/A')}\n"
-                            # Tire pressure (convert bar to psi)
-                            tp = data.get('tire_pressure', {})
-                            status_message += f"🛞 Tire Pressure (psi): {fmt_tire_pressure(tp)}\n"
-                            # Doors/windows
-                            doors = data.get('doors', {})
-                            windows = data.get('windows', {})
-                            status_message += f"🚪 Doors: {summarize_doors(doors)}\n"
-                            status_message += f"🪟 Windows: {summarize_windows(windows)}\n"
-                            status_message += f"🧭 Heading: {data.get('heading', 'N/A')}°\n"
-                            # Notifications/alerts
-                            notes = data.get('notifications', [])
-                            if notes:
-                                status_message += "⚠️ Alerts: " + ", ".join([str(n) for n in notes]) + "\n"
-                            status_message += f"📍 {data.get('address', 'N/A')}\n"
-                            status_message += f"🕒 {data.get('timestamp', 'N/A')}\n"
-                            if map_link:
-                                status_message += f"{map_link}\n"
-                            status_message += "\n"
-                    else:
-                        status_message = "No status available yet."
-
-                    send_telegram_message(status_message)
+                        send_telegram_message(status_message)
         except Exception as e:
             print(f"Error polling Telegram: {e}")
 
