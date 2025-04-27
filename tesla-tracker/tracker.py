@@ -60,7 +60,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return miles
 
 async def track_vehicle():
-    with teslapy.Tesla(TESLA_EMAIL, cache_file='/home/jacob/tesla-tracker/tesla_token.json') as tesla:
+    with teslapy.Tesla(TESLA_EMAIL, cache_file='/opt/tesla-tracker/tesla_token.json') as tesla:
         if not tesla.authorized:
             print("Authorize via browser...")
             print(tesla.authorization_url(locale='en-US'))
@@ -118,7 +118,7 @@ async def track_vehicle():
                         print(f"No significant change for {label}: distance_moved={distance_moved:.2f} mi, battery_delta={battery_delta}%, skipping log.")
 
                     # --- Save latest status to file ---
-                    latest_status_path = os.getenv("LATEST_STATUS_PATH", '/home/jacob/tesla-tracker/latest_status.json')
+                    latest_status_path = os.getenv("LATEST_STATUS_PATH", '/opt/tesla-tracker/latest_status.json')
                     if 'latest_status' not in globals():
                         global latest_status
                         latest_status = {}

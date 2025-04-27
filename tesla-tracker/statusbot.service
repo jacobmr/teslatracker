@@ -3,9 +3,9 @@ Description=Tesla StatusBot Telegram Service
 After=network.target
 
 [Service]
-User=jacob
-WorkingDirectory=/home/jacob/tesla-tracker
-ExecStart=/home/jacob/tesla-tracker/venv/bin/python3 /home/jacob/tesla-tracker/statusbot.py
+User=teslatracker
+WorkingDirectory=/opt/tesla-tracker
+ExecStart=/opt/tesla-tracker/venv/bin/python3 /opt/tesla-tracker/statusbot.py
 Restart=always
 Environment=PYTHONUNBUFFERED=1
 
