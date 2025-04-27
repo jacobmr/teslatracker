@@ -2,3 +2,20 @@
 /tesla-tracker/creds.json
 /tesla-tracker/tesla_token.json
 /tesla-tracker/cache.json
+# Ignore deployment and server scripts
+/deploy_and_restart_server.sh
+# Ignore environment and log files
+.env
+statusbot_debug.log
+# Ignore backup and temp directories
+/teslatrack-backup/
+# Ignore Google Sheets exports and CSVs
+*.csv
+# Ignore test scripts and logs
+/tesla-tracker/print_test.py
+/tesla-tracker/test_telegram.py
+/tesla-tracker/test_write.log
+# Ignore BFG and git clean-up artifacts
+.bfg-report/
+.git.bfg-report/
+bfg-replacements.txt

@@ -12,13 +12,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Config ---
-TESLA_EMAIL = "jacob@reider.us"
-GOOGLE_CREDS_JSON = "/home/jacob/tesla-tracker/creds.json"
-SHEET_NAME = "Tesla Tracker"
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = "6269997804"
-POLL_INTERVAL = 60  # seconds
+TESLA_EMAIL = os.getenv("TESLA_EMAIL")
+GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
+SHEET_NAME = os.getenv("SHEET_NAME", "Tesla Tracker")
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 60))
 
 # Track trips
 vehicle_states = {}
@@ -70,7 +70,7 @@ async def track_vehicle():
         vehicles = tesla.vehicle_list()
         sheet = init_sheet()
 
-        car_labels = ["Alicia", "Jacob"]  # Updated names for vehicles
+        car_labels = [os.getenv("CAR_LABEL_1"), os.getenv("CAR_LABEL_2")]  # Updated names for vehicles
 
         last_label = {}
         last_lat = {}
@@ -118,7 +118,7 @@ async def track_vehicle():
                         print(f"No significant change for {label}: distance_moved={distance_moved:.2f} mi, battery_delta={battery_delta}%, skipping log.")
 
                     # --- Save latest status to file ---
-                    latest_status_path = '/home/jacob/tesla-tracker/latest_status.json'
+                    latest_status_path = os.getenv("LATEST_STATUS_PATH", '/home/jacob/tesla-tracker/latest_status.json')
                     if 'latest_status' not in globals():
                         global latest_status
                         latest_status = {}
@@ -204,7 +204,7 @@ async def track_vehicle():
                             end_address = address
                             trip_miles = haversine(start_lat, start_lon, lat, lon)
 
-                            message = f"🚗 {label} Trip ended\nDuration: {trip_duration:.1f} min\nDistance: {trip_miles:.1f} miles\nFrom: {start_address}\nTo: {end_address}"
+                            message = f" {label} Trip ended\nDuration: {trip_duration:.1f} min\nDistance: {trip_miles:.1f} miles\nFrom: {start_address}\nTo: {end_address}"
                             send_telegram_message(message)
                             print(f"Trip summary sent for {label}")
                             state['moving'] = False

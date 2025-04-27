@@ -1,7 +1,8 @@
 function updateTrackerSheet() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
-  const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY';  // Replace with your own Google Maps API key
+  // Replace with your own Google Maps API key in your .env file or Google Cloud console
+  const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY';  
 
   for (let i = 1; i < data.length; i++) {
     const row = i + 1;
@@ -21,7 +22,7 @@ function updateTrackerSheet() {
     const needsAddress = !location || !String(location).startsWith('=HYPERLINK');
     if (needsAddress) {
       try {
-        const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=YOUR_GOOGLE_MAPS_API_KEY`;
+        const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${apiKey}`;
         const response = UrlFetchApp.fetch(geoUrl);
         const json = JSON.parse(response.getContentText());
 
@@ -40,7 +41,7 @@ function updateTrackerSheet() {
     // --- Static map image in column H ---
     if (!mapImage || mapImage === "") {
       try {
-        const staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=15&size=300x150&maptype=roadmap&markers=color:red|${lat},${lon}&key=YOUR_GOOGLE_MAPS_API_KEY`;
+        const staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=15&size=300x150&maptype=roadmap&markers=color:red|${lat},${lon}&key=${apiKey}`;
         const imageFormula = `=IMAGE("${staticMapUrl}")`;
         sheet.getRange(row, 8).setFormula(imageFormula); // Column H
       } catch (err) {

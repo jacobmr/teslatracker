@@ -55,9 +55,8 @@ Tracks your Tesla’s location, status, and logs data to a Google Sheet, with li
 
 ## Features
 
-- Logs vehicle location, battery, speed, and more to Google Sheets.
-- Sends live status and location (with map links) to Telegram.
-- Rich /status command: battery, odometer, charging, climate, security, tire pressure, doors/windows, heading, and more.
+- Logs location, battery, and trip data for multiple Teslas.
+- Sends trip summaries and live status to Telegram.
 - Easily extensible for interactive commands (lock/unlock, climate, etc.).
 - Designed to run headlessly (e.g., on a Raspberry Pi).
 
@@ -103,17 +102,14 @@ Place it in `tesla-tracker/creds.json`.
 
 ### 4. Tesla API Setup
 
-- Create a Tesla account at [Tesla.com](https://www.tesla.com/).
-- You’ll need your account email and password for first-time auth.
-- The bot uses [TeslaPy](https://teslapy.readthedocs.io/) for API access.
+- Get your Tesla API credentials and set them as environment variables in your `.env` file.
 
 ---
 
 ### 5. Telegram Bot Setup
 
-- Create a bot at [BotFather](https://t.me/botfather) on Telegram.
 - Get your bot token and chat ID.
-- Set these as environment variables or edit directly in `statusbot.py` and `tracker.py`.
+- Set these as environment variables in your `.env` file.
 
 ---
 
@@ -145,7 +141,7 @@ pip install -r requirements.txt
 ## Security
 
 - **Never** commit your `creds.json` or Tesla tokens.
-- [.gitignore](.gitignore) is pre-configured to help.
+- `.gitignore` is pre-configured to help.
 - If you accidentally committed secrets, revoke and regenerate them.
 
 ---
@@ -167,7 +163,7 @@ Open an issue or PR for improvements, bug fixes, or new features.
 ## License
 
 MIT License.  
-(c) Jacob Reider, 2025
+(c) Tesla Tracker Project, 2025
 
 ---
 
@@ -180,4 +176,4 @@ MIT License.
 ---
 
 **Questions?**  
-Open an issue on GitHub or email jacob@reider.usbrew install 
+Open an issue on GitHub.
