@@ -13,6 +13,7 @@ load_dotenv()
 
 # --- Config ---
 TESLA_EMAIL = os.getenv("TESLA_EMAIL")
+TESLA_TOKEN_CACHE = os.getenv("TESLA_TOKEN_CACHE", "/home/jacob/tesla-tracker/tesla_token.json")
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 SHEET_NAME = os.getenv("SHEET_NAME", "Tesla Tracker")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
@@ -60,7 +61,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return miles
 
 async def track_vehicle():
-    with teslapy.Tesla(TESLA_EMAIL, cache_file='/opt/tesla-tracker/tesla_token.json') as tesla:
+    with teslapy.Tesla(TESLA_EMAIL, cache_file=TESLA_TOKEN_CACHE) as tesla:
         if not tesla.authorized:
             print("Authorize via browser...")
             print(tesla.authorization_url(locale='en-US'))
@@ -79,8 +80,12 @@ async def track_vehicle():
         last_address = {}
 
         while True:
-            for idx, vehicle in enumerate(vehicles):
+            for i, vehicle in enumerate(vehicles):
+                label = None
                 try:
+                    # Set label as early as possible for error handling
+                    vin = vehicle['vin'] if isinstance(vehicle, dict) and 'vin' in vehicle else getattr(vehicle, 'vin', '(unknown)')
+                    label = car_labels[i] if i < len(car_labels) else f'Car {i+1}'
                     vehicle.sync_wake_up()
                     data = vehicle.get_vehicle_data()
 
@@ -93,8 +98,6 @@ async def track_vehicle():
                     battery = charge_state.get('battery_level')
                     timestamp = datetime.utcnow().isoformat()
                     vin = vehicle['vin']
-                    label = car_labels[idx] if idx < len(car_labels) else f"Car{idx+1}"
-
                     address = reverse_geocode(lat, lon) if lat and lon else ""
 
                     # Only write to sheet if data is meaningfully different
@@ -210,7 +213,7 @@ async def track_vehicle():
                             state['moving'] = False
 
                 except Exception as e:
-                    print(f"Error tracking {label}: {e}")
+                    print(f"Error tracking {label or '(unknown)'}: {e}")
 
             await asyncio.sleep(POLL_INTERVAL)
 

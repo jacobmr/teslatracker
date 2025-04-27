@@ -7,6 +7,7 @@ import time
 import json
 import requests
 import os
+import re
 from dotenv import load_dotenv
 load_dotenv()
 print(f"[DEBUG] TELEGRAM_CHAT_ID at startup: {os.getenv('TELEGRAM_CHAT_ID')}", flush=True)
@@ -15,6 +16,7 @@ print(f"[DEBUG] LATEST_STATUS_FILE: {os.getenv('LATEST_STATUS_FILE')}", flush=Tr
 print(f"[DEBUG] TESLA_TOKEN_CACHE: {os.getenv('TESLA_TOKEN_CACHE')}", flush=True)
 print(f"[DEBUG] GOOGLE_CREDS_JSON: {os.getenv('GOOGLE_CREDS_JSON')}", flush=True)
 print(f"[DEBUG] CAR_LABELS: {os.getenv('CAR_LABELS')}", flush=True)
+print(f"[DEBUG] CAR_COLORS: {os.getenv('CAR_COLORS')}", flush=True)
 print(f"[DEBUG] SHEET_NAME: {os.getenv('SHEET_NAME')}", flush=True)
 
 # --- Config ---
@@ -24,6 +26,7 @@ LATEST_STATUS_FILE = os.getenv("LATEST_STATUS_FILE")
 TESLA_EMAIL = os.getenv("TESLA_EMAIL")
 TESLA_TOKEN_CACHE = os.getenv("TESLA_TOKEN_CACHE")
 CAR_LABELS = [s.strip() for s in os.getenv("CAR_LABELS", "Car 1,Car 2").split(",")]
+CAR_COLORS = [s.strip() for s in os.getenv("CAR_COLORS", "🔵,⚪").split(",")]
 
 pending_actions = {}
 
@@ -125,11 +128,47 @@ def perform_tesla_action(car_index, action):
     except Exception as e:
         return False, f"Tesla API error: {e}"
 
+# --- Allowed users management ---
+ALLOWED_USERS_FILE = "allowed_users.json"
+PENDING_ADDS_FILE = "pending_adds.json"
+
+def load_allowed_users():
+    try:
+        with open(ALLOWED_USERS_FILE, "r") as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+def save_allowed_users(users):
+    try:
+        with open(ALLOWED_USERS_FILE, "w") as f:
+            json.dump(list(users), f)
+    except Exception as e:
+        print(f"[ERROR] Could not save allowed users: {e}", flush=True)
+
+def load_pending_adds():
+    try:
+        with open(PENDING_ADDS_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_pending_adds(pending):
+    try:
+        with open(PENDING_ADDS_FILE, "w") as f:
+            json.dump(pending, f)
+    except Exception as e:
+        print(f"[ERROR] Could not save pending adds: {e}", flush=True)
+
 # --- Main polling loop ---
 def poll_telegram_commands():
     print("[DEBUG] poll_telegram_commands loop started", flush=True)
     last_update_id = load_last_update_id()
     processed_update_ids = set()
+    allowed_users = load_allowed_users()
+    pending_adds = load_pending_adds()
+    pending_requests = {}  # user_id -> {name, username}
+    ADMIN_USER_ID = int(os.getenv("TELEGRAM_ADMIN_USER_ID", "6269997804"))  # Set your own user ID here
     while True:
         print("[DEBUG] poll_telegram_commands loop alive", flush=True)
         try:
@@ -141,13 +180,70 @@ def poll_telegram_commands():
             for update in updates:
                 update_id = update['update_id']
                 if update_id in processed_update_ids:
-                    continue  # Skip already processed updates (in-memory)
+                    continue
                 processed_update_ids.add(update_id)
                 try:
-                    print(f"[DEBUG] Processing update: {update}", flush=True)
                     message = update.get('message', {}).get('text', '')
                     user_id = update.get('message', {}).get('from', {}).get('id')
+                    username = update.get('message', {}).get('from', {}).get('username')
+                    first_name = update.get('message', {}).get('from', {}).get('first_name', '')
+                    last_name = update.get('message', {}).get('from', {}).get('last_name', '')
+                    full_name = f"{first_name} {last_name}".strip()
                     print(f"[DEBUG] Received message: '{message}' from user {user_id} (update: {update})", flush=True)
+
+                    # --- Handle admin approval for pending requests ---
+                    if user_id == ADMIN_USER_ID and message.lower().startswith("yes "):
+                        try:
+                            approve_id = int(message.strip().split()[1])
+                        except Exception:
+                            send_telegram_message("Usage: yes <user_id>")
+                            continue
+                        if approve_id in pending_requests:
+                            allowed_users.add(approve_id)
+                            save_allowed_users(allowed_users)
+                            user_info = pending_requests.pop(approve_id)
+                            send_telegram_message(f"Access granted to {user_info['full_name']} (@{user_info['username']}) [{approve_id}].")
+                            # Notify the newly approved user
+                            notify_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                            notify_payload = {"chat_id": approve_id, "text": "You have been approved to use Tesla Tracker!"}
+                            requests.post(notify_url, data=notify_payload)
+                        else:
+                            send_telegram_message(f"No pending request for user_id {approve_id}.")
+                        continue
+
+                    # --- Handle /add command (admin only) ---
+                    if user_id == ADMIN_USER_ID and message.lower().startswith("/add"):
+                        match = re.search(r"@([A-Za-z0-9_]+)", message)
+                        if match:
+                            pending_username = match.group(1)
+                            pending_adds[pending_username.lower()] = True
+                            save_pending_adds(pending_adds)
+                            send_telegram_message(f"Ask @{pending_username} to send me any message to complete registration.")
+                        else:
+                            send_telegram_message("Usage: /add @username (ask the user to send me any message after)")
+                        continue
+
+                    # --- Handle new user registration via /add ---
+                    if username and username.lower() in pending_adds:
+                        allowed_users.add(user_id)
+                        save_allowed_users(allowed_users)
+                        del pending_adds[username.lower()]
+                        save_pending_adds(pending_adds)
+                        send_telegram_message(f"Welcome, @{username}! You now have access to Tesla Tracker.")
+                        # Notify admin
+                        send_telegram_message(f"@{username} ({user_id}) has been added to allowed users.", markdown=False)
+                        continue
+
+                    # --- Only allow commands from allowed users or admin ---
+                    if user_id not in allowed_users and user_id != ADMIN_USER_ID:
+                        # Notify the admin of the access request
+                        if user_id not in pending_requests:
+                            pending_requests[user_id] = {"full_name": full_name, "username": username or "(none)"}
+                            send_telegram_message(f"User {full_name} (@{username or 'none'}) [{user_id}] has requested access. Reply with 'yes {user_id}' to approve.")
+                        # Notify the user
+                        send_telegram_message("You are not authorized to use this bot. The admin has been notified of your request.")
+                        continue
+
                     # Handle pending action
                     if user_id in pending_actions:
                         action = pending_actions[user_id]
@@ -184,14 +280,15 @@ def poll_telegram_commands():
                             with open(LATEST_STATUS_FILE, 'r') as f:
                                 status_data = json.load(f)
                             status_message = ""
-                            for vin, data in status_data.items():
+                            for idx, (vin, data) in enumerate(status_data.items()):
                                 lat = data.get('latitude')
                                 lon = data.get('longitude')
                                 map_link = ""
                                 if lat is not None and lon is not None:
                                     map_link = f"[Google Maps](https://maps.google.com/?q={lat},{lon})"
                                     send_telegram_location(lat, lon)
-                                status_message += f"🚗 *{data['label']}*\n"
+                                color_emoji = CAR_COLORS[idx] if idx < len(CAR_COLORS) else ''
+                                status_message += f"🚗 {color_emoji} *{data['label']}*\n"
                                 status_message += f"🔋 Battery: {data.get('battery', 'N/A')}%   |   Odometer: {fmt_odometer(data.get('odometer'))} mi\n"
                                 status_message += f"⚡ Charging: {data.get('charging_state', 'N/A')} ({data.get('charger_power', 'N/A')} kW)\n"
                                 status_message += f"🌡️ Inside: {fmt_temp(data.get('inside_temp'))}   |   Outside: {fmt_temp(data.get('outside_temp'))}\n"
