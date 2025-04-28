@@ -185,32 +185,75 @@ async def track_vehicle():
 
                     # --- Trip tracking logic ---
                     if vin not in vehicle_states:
-                        vehicle_states[vin] = {'moving': False, 'trip_start_time': None, 'trip_start_latlon': None}
+                        vehicle_states[vin] = {
+                            'moving': False, 
+                            'trip_start_time': None, 
+                            'trip_start_latlon': None,
+                            'stopped_since': None,       # Track when the car stopped
+                            'stopped_location': None,    # Where the car stopped
+                            'last_trip_end_time': None   # Prevent duplicate notifications
+                        }
 
                     state = vehicle_states[vin]
 
                     if speed and speed > 5:
                         # Car is moving
+                        state['stopped_since'] = None
+                        state['stopped_location'] = None
+                        
                         if not state['moving']:
-                            # New trip started
-                            state['trip_start_time'] = datetime.utcnow()
-                            state['trip_start_latlon'] = (lat, lon)
+                            # New trip or resuming after brief stop
+                            if state['trip_start_time'] is None:
+                                # New trip
+                                state['trip_start_time'] = datetime.utcnow()
+                                state['trip_start_latlon'] = (lat, lon)
+                                print(f"New trip started for {label} at {address}")
+                            else:
+                                print(f"Resuming trip for {label} after temporary stop")
                             state['moving'] = True
                     else:
                         # Car is stopped
+                        now = datetime.utcnow()
+                        
                         if state['moving']:
-                            # Trip ended
-                            trip_end_time = datetime.utcnow()
-                            trip_duration = (trip_end_time - state['trip_start_time']).total_seconds() / 60.0  # minutes
-                            start_lat, start_lon = state['trip_start_latlon']
-                            start_address = reverse_geocode(start_lat, start_lon)
-                            end_address = address
-                            trip_miles = haversine(start_lat, start_lon, lat, lon)
-
-                            message = f" {label} Trip ended\nDuration: {trip_duration:.1f} min\nDistance: {trip_miles:.1f} miles\nFrom: {start_address}\nTo: {end_address}"
-                            send_telegram_message(message)
-                            print(f"Trip summary sent for {label}")
-                            state['moving'] = False
+                            if state['stopped_since'] is None:
+                                # Just stopped - mark the time and location
+                                state['stopped_since'] = now
+                                state['stopped_location'] = (lat, lon)
+                                print(f"{label} temporarily stopped at {address}")
+                            else:
+                                # Check if stopped for more than 5 minutes
+                                stopped_duration = (now - state['stopped_since']).total_seconds() / 60.0
+                                
+                                # Only end trip if:
+                                # 1. Stopped for more than 5 minutes
+                                # 2. AND we haven't reported a trip end recently (avoid duplicates)
+                                if stopped_duration > 5 and (state['last_trip_end_time'] is None or 
+                                    (now - state['last_trip_end_time']).total_seconds() > 300):  # 5 min between notifications
+                                    
+                                    # Trip ended
+                                    trip_end_time = now
+                                    trip_duration = (trip_end_time - state['trip_start_time']).total_seconds() / 60.0
+                                    start_lat, start_lon = state['trip_start_latlon']
+                                    start_address = reverse_geocode(start_lat, start_lon)
+                                    end_address = address
+                                    trip_miles = haversine(start_lat, start_lon, lat, lon)
+                                    
+                                    # Only report meaningful trips (moved more than 0.2 miles)
+                                    if trip_miles > 0.2:
+                                        message = f"🚗 {label} Trip ended\nDuration: {trip_duration:.1f} min\nDistance: {trip_miles:.1f} miles\nFrom: {start_address}\nTo: {end_address}"
+                                        send_telegram_message(message)
+                                        print(f"Trip summary sent for {label}")
+                                    else:
+                                        print(f"Skipping short trip notification for {label} - only {trip_miles:.2f} miles")
+                                    
+                                    # Reset trip state
+                                    state['moving'] = False
+                                    state['last_trip_end_time'] = now
+                                    state['trip_start_time'] = None
+                                    state['trip_start_latlon'] = None
+                                else:
+                                    print(f"{label} stopped for {stopped_duration:.1f} min, waiting to see if trip continues...")
 
                 except Exception as e:
                     print(f"Error tracking {label or '(unknown)'}: {e}")
