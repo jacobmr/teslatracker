@@ -1,0 +1,38 @@
+name: Deploy EVTrak Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'evtrak/backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy EVTrak Backend
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./evtrak/backend
+        
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: './evtrak/backend'
+          command: deploy --env production
+          
+      - name: Apply database migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: './evtrak/backend'
+          command: d1 execute evtrak-db --file=./src/db/schema.sql
