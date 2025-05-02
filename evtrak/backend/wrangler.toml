@@ -34,18 +34,18 @@ name = "evtrak-backend"
 workers_dev = false
 route = "www.evtrak.com/api/*" # Custom domain for production with path prefix
 
-# D1 Database binding
+# D1 Database binding for production
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "evtrak-db"
 database_id = "9041f7e0-e960-47e2-88ba-87c71846ae8b" # Real D1 database ID
 
-# KV namespace for caching and tokens
+# KV namespace for caching and tokens in production
 [[env.production.kv_namespaces]]
 binding = "CACHE"
 id = "1d97ebbf69e64568a42ca1d6ab55300a" # Real KV namespace ID
 
-# Environment variables
+# Environment variables for production
 [env.production.vars]
 ENVIRONMENT = "production"
 # These will be set using wrangler secret commands
