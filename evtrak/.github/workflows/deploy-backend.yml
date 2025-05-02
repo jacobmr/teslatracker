@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - evtrak-commercial
     paths:
       - 'evtrak/backend/**'
 
@@ -28,11 +29,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: './evtrak/backend'
-          command: deploy --env production
+          command: deploy --env dev
           
       - name: Apply database migrations
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: './evtrak/backend'
-          command: d1 execute evtrak-db --file=./src/db/schema.sql
+          command: d1 execute evtrak-db-dev --file=./src/db/schema.sql
