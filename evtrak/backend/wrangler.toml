@@ -1,0 +1,62 @@
+name = "evtrak-backend"
+main = "src/index.ts"
+compatibility_date = "2023-05-18"
+
+# Development environment
+[env.dev]
+name = "evtrak-backend-dev"
+workers_dev = true
+# D1 Database binding
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "evtrak-db-dev"
+database_id = "9041f7e0-e960-47e2-88ba-87c71846ae8b" # Real D1 database ID
+
+# KV namespace for caching and tokens
+[[env.dev.kv_namespaces]]
+binding = "CACHE"
+id = "1d97ebbf69e64568a42ca1d6ab55300a" # Real KV namespace ID
+
+# Environment variables
+[env.dev.vars]
+ENVIRONMENT = "development"
+TESLA_CLIENT_ID = "04e1c676-c91e-483e-8e3b-a0c1e7ea3a24"
+TESLA_CLIENT_SECRET = "04e1c676-c91e-483e-8e3b-a0c1e7ea3a24"
+ADMIN_API_KEY = "dev-admin-key" # Replace with a secure key for development
+
+# Cron triggers for development testing
+[env.dev.triggers]
+crons = ["0 0 * * *"] # Daily at midnight for testing
+
+# Production environment
+[env.production]
+name = "evtrak-backend"
+workers_dev = false
+route = "www.evtrak.com/api/*" # Custom domain for production with path prefix
+
+# D1 Database binding for production
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "evtrak-db"
+database_id = "9041f7e0-e960-47e2-88ba-87c71846ae8b" # Real D1 database ID
+
+# KV namespace for caching and tokens in production
+[[env.production.kv_namespaces]]
+binding = "CACHE"
+id = "1d97ebbf69e64568a42ca1d6ab55300a" # Real KV namespace ID
+
+# Environment variables for production
+[env.production.vars]
+ENVIRONMENT = "production"
+# These will be set using wrangler secret commands
+# TESLA_CLIENT_ID 
+# TESLA_CLIENT_SECRET
+# JWT_SECRET
+# ADMIN_API_KEY
+
+# Cron triggers for production
+[env.production.triggers]
+crons = [
+  "0 0 * * *",     # Daily at midnight for vehicle data sync
+  "0 0 1 1 *"      # January 1st at midnight for annual batch processing
+]
